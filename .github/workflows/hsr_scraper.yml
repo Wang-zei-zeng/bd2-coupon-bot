@@ -92,17 +92,21 @@ jobs:
         try:
             res = requests.get(scrape_url, headers=scrape_headers, timeout=15)
             if res.status_code == 200:
-                soup = BeautifulSoup(res.text, 'html.parser')
-                for script in soup.find_all('script'):
+                scripts = soup.find_all('script')
+                for script in scripts:
                     if script.string and 'initialCodes' in script.string:
-                        match = re.search(r'self\.__next_f\.push\(\[\d+,\s*"(.*)"\s*\]\)', script.string)
+                        match = re.search(r'self\.__next_f\.push\(\[\d+,\s*\"(.*)\"\s*\]\)', script.string)
                         if match:
-                            raw_str = match.group(1).replace('\n', '')
-                            clean_str = raw_str.replace('\"', '"').replace('"$undefined"', 'null')
-                            inner_match = re.search(r'\{"initialCodes".*?\]\}', clean_str)
-                            if inner_match:
-                                target_json_data = json.loads(inner_match.group(0))['initialCodes']
-                                break
+                            raw_str = match.group(1).replace('\\n', '')
+                            clean_str = raw_str.replace('\\"', '"').replace('"$undefined"', 'null')
+                            try:
+                                inner_match = re.search(r'\{"initialCodes".*?\]\}', clean_str)
+                                    if inner_match:
+                                        actual_content = json.loads(inner_match.group(0))
+                                        target_json_data = actual_content['initialCodes']
+                                        break
+                                except Exception as e:
+                                    pass
         except Exception as e:
             print(f'❌ 爬取網頁發生異常: {e}')
             if DISCORD_WEBHOOK_URL:
