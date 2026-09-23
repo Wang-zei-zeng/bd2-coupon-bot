@@ -6,7 +6,6 @@ on:
       - main
 
   schedule:
-    # GitHub Actions 使用 UTC
     # 00:00 UTC = 台灣時間 08:00
     - cron: '0 0 * * *'
 
@@ -37,7 +36,7 @@ jobs:
 
 
     # ================================================================
-    # 3. Dependencies
+    # 3. Install dependencies
     # ================================================================
 
     - name: Install dependencies
@@ -69,7 +68,7 @@ jobs:
 
 
         # ============================================================
-        # 基本設定
+        # 設定
         # ============================================================
 
         GAS_WEB_URL = os.getenv(
@@ -101,7 +100,7 @@ jobs:
 
 
         # ============================================================
-        # Discord 通知
+        # Discord
         # ============================================================
 
         def send_discord(message):
@@ -116,35 +115,306 @@ jobs:
                     json={
                         'content': message
                     },
-                    timeout=10
+                    timeout=15
                 )
 
-                if response.status_code >= 400:
-
-                    print(
-                        f'⚠️ Discord HTTP '
-                        f'{response.status_code}'
-                    )
+                print(
+                    f'📡 Discord HTTP: '
+                    f'{response.status_code}'
+                )
 
             except Exception as e:
 
                 print(
-                    f'⚠️ Discord 通知發送失敗: {e}'
+                    f'⚠️ Discord 通知失敗: {e}'
                 )
+
+
+        # ============================================================
+        # Google Apps Script GET
+        #
+        # 這裡是這次主要修正的地方：
+        #
+        # 1. timeout 從 15 秒提高到 30 秒
+        # 2. 最多重試 3 次
+        # 3. 每次失敗等待
+        # 4. 印出 HTTP status
+        # 5. 印出回傳內容前 500 字
+        # ============================================================
+
+        def get_gas_data():
+
+            max_attempts = 3
+
+            for attempt in range(
+                1,
+                max_attempts + 1
+            ):
+
+                print()
+                print(
+                    f'📡 Google GAS GET '
+                    f'第 {attempt}/{max_attempts} 次'
+                )
+
+
+                try:
+
+                    response = requests.get(
+
+                        GAS_WEB_URL,
+
+                        params={
+                            'action': 'getData'
+                        },
+
+                        timeout=30,
+
+                        headers={
+                            'User-Agent': (
+                                'Mozilla/5.0 '
+                                '(Windows NT 10.0; Win64; x64) '
+                                'AppleWebKit/537.36 '
+                                '(KHTML, like Gecko) '
+                                'Chrome/120.0 Safari/537.36'
+                            ),
+
+                            'Accept': (
+                                'application/json,'
+                                'text/plain,*/*'
+                            ),
+
+                            'Cache-Control': 'no-cache'
+                        },
+
+                        allow_redirects=True
+
+                    )
+
+
+                    print(
+                        f'📡 GAS HTTP Status: '
+                        f'{response.status_code}'
+                    )
+
+
+                    print(
+                        f'📡 GAS 最終 URL: '
+                        f'{response.url}'
+                    )
+
+
+                    if response.status_code != 200:
+
+                        print(
+                            '⚠️ GAS HTTP 非 200：'
+                            f'{response.status_code}'
+                        )
+
+                        print(
+                            '📄 回應內容前 500 字：'
+                        )
+
+                        print(
+                            response.text[:500]
+                        )
+
+                    else:
+
+                        # ------------------------------------------------
+                        # 嘗試 JSON
+                        # ------------------------------------------------
+
+                        try:
+
+                            data = response.json()
+
+                            print(
+                                '✅ GAS JSON 讀取成功'
+                            )
+
+                            return data
+
+                        except Exception as json_error:
+
+                            print(
+                                '❌ GAS HTTP 200，'
+                                '但無法解析 JSON'
+                            )
+
+                            print(
+                                f'JSON Error: '
+                                f'{json_error}'
+                            )
+
+                            print(
+                                '📄 回應內容前 1000 字：'
+                            )
+
+                            print(
+                                response.text[:1000]
+                            )
+
+
+                except requests.exceptions.Timeout:
+
+                    print(
+                        '⏱️ GAS 請求逾時。'
+                    )
+
+                except requests.exceptions.ConnectionError as e:
+
+                    print(
+                        f'🔌 GAS 連線錯誤: {e}'
+                    )
+
+                except requests.exceptions.RequestException as e:
+
+                    print(
+                        f'❌ GAS Request 錯誤: {e}'
+                    )
+
+                except Exception as e:
+
+                    print(
+                        f'❌ GAS 未預期錯誤: {e}'
+                    )
+
+
+                # --------------------------------------------------------
+                # Retry
+                # --------------------------------------------------------
+
+                if attempt < max_attempts:
+
+                    wait_seconds = attempt * 5
+
+                    print(
+                        f'⏳ {wait_seconds} 秒後重試...'
+                    )
+
+                    time.sleep(
+                        wait_seconds
+                    )
+
+
+            return None
+
+
+        # ============================================================
+        # Google Apps Script POST
+        # ============================================================
+
+        def post_gas(payload):
+
+            max_attempts = 3
+
+            for attempt in range(
+                1,
+                max_attempts + 1
+            ):
+
+                print(
+                    f'📡 Google GAS POST '
+                    f'第 {attempt}/{max_attempts} 次'
+                )
+
+
+                try:
+
+                    response = requests.post(
+
+                        GAS_WEB_URL,
+
+                        json=payload,
+
+                        timeout=30,
+
+                        headers={
+                            'User-Agent': (
+                                'Mozilla/5.0 '
+                                '(Windows NT 10.0; Win64; x64) '
+                                'AppleWebKit/537.36 '
+                                '(KHTML, like Gecko) '
+                                'Chrome/120.0 Safari/537.36'
+                            ),
+
+                            'Accept': (
+                                'application/json,'
+                                'text/plain,*/*'
+                            )
+                        },
+
+                        allow_redirects=True
+
+                    )
+
+
+                    print(
+                        f'📡 GAS POST HTTP: '
+                        f'{response.status_code}'
+                    )
+
+
+                    if response.status_code == 200:
+
+                        print(
+                            f'📄 GAS POST 回應: '
+                            f'{response.text[:500]}'
+                        )
+
+                        return True
+
+
+                    print(
+                        f'⚠️ GAS POST HTTP '
+                        f'{response.status_code}'
+                    )
+
+
+                except requests.exceptions.Timeout:
+
+                    print(
+                        '⏱️ GAS POST 逾時'
+                    )
+
+
+                except Exception as e:
+
+                    print(
+                        f'❌ GAS POST 錯誤: {e}'
+                    )
+
+
+                if attempt < max_attempts:
+
+                    wait_seconds = attempt * 5
+
+                    print(
+                        f'⏳ {wait_seconds} 秒後重試...'
+                    )
+
+                    time.sleep(
+                        wait_seconds
+                    )
+
+
+            return False
 
 
         # ============================================================
         # 初始化
         # ============================================================
 
-        print('=== 初始化 ===')
+        print(
+            '=== 初始化 ==='
+        )
 
 
         if not GAS_WEB_URL:
 
             message = (
-                '❌ GitHub Secret '
-                'HSR_GAS_WEB_URL 未設定。'
+                '❌ HSR_GAS_WEB_URL 未設定'
             )
 
             print(message)
@@ -157,8 +427,7 @@ jobs:
         if not ACCOUNTS_JSON:
 
             message = (
-                '❌ GitHub Secret '
-                'HSR_ACCOUNTS_JSON 未設定。'
+                '❌ HSR_ACCOUNTS_JSON 未設定'
             )
 
             print(message)
@@ -169,7 +438,7 @@ jobs:
 
 
         # ============================================================
-        # 解析帳號
+        # Accounts
         # ============================================================
 
         try:
@@ -178,23 +447,27 @@ jobs:
                 ACCOUNTS_JSON
             )
 
+
             if not isinstance(
                 user_accounts,
                 list
             ):
+
                 raise ValueError(
                     'ACCOUNTS_JSON 必須是 JSON array'
                 )
+
 
             print(
                 f'✅ 成功讀取 '
                 f'{len(user_accounts)} 組帳號資料。'
             )
 
+
         except Exception as e:
 
             message = (
-                f'❌ 解析 ACCOUNTS_JSON 發生錯誤: {e}'
+                f'❌ 解析 ACCOUNTS_JSON 失敗: {e}'
             )
 
             print(message)
@@ -205,8 +478,7 @@ jobs:
 
 
         # ============================================================
-        # 步驟 1
-        # Google Sheet 歷史紀錄
+        # 步驟 1：Google Sheet
         # ============================================================
 
         print()
@@ -215,52 +487,22 @@ jobs:
         )
 
 
-        try:
-
-            gas_res = requests.get(
-                GAS_WEB_URL,
-                params={
-                    'action': 'getData'
-                },
-                timeout=15
-            )
-
-            gas_res.raise_for_status()
-
-            data = gas_res.json()
-
-            sent_codes = data.get(
-                'sentCodes',
-                []
-            )
-
-            if not isinstance(
-                sent_codes,
-                list
-            ):
-                sent_codes = []
+        data = get_gas_data()
 
 
-            # 統一格式
-            sent_codes = {
-                str(code).strip().upper()
-                for code in sent_codes
-                if str(code).strip()
-            }
-
-
-            print(
-                f'📊 試算表歷史已記錄序號共 '
-                f'{len(sent_codes)} 筆。'
-            )
-
-
-        except Exception as e:
+        if data is None:
 
             message = (
-                f'❌ 讀取 Google 試算表歷史紀錄失敗: '
-                f'{e}'
+                '❌ 無法從 Google Apps Script '
+                '取得歷史紀錄。\n\n'
+                '可能原因：\n'
+                '1. GAS 執行時間過久\n'
+                '2. GAS Web App 暫時沒有回應\n'
+                '3. Google Sheet 本身被鎖定\n'
+                '4. GAS doGet() 程式發生錯誤\n'
+                '5. Web App 部署版本不是最新版本'
             )
+
 
             print(message)
 
@@ -269,13 +511,50 @@ jobs:
             sys.exit(1)
 
 
+        # ------------------------------------------------------------
+        # 取得 sentCodes
+        # ------------------------------------------------------------
+
+        sent_codes = data.get(
+            'sentCodes',
+            []
+        )
+
+
+        if not isinstance(
+            sent_codes,
+            list
+        ):
+
+            print(
+                '⚠️ GAS 回傳的 sentCodes '
+                '不是 list，改成空清單。'
+            )
+
+            sent_codes = []
+
+
+        sent_codes = {
+
+            str(code)
+            .strip()
+            .upper()
+
+            for code in sent_codes
+
+            if str(code).strip()
+
+        }
+
+
+        print(
+            f'📊 試算表歷史已記錄序號共 '
+            f'{len(sent_codes)} 筆。'
+        )
+
+
         # ============================================================
-        # 步驟 2
-        # 抓取最新兌換碼
-        #
-        # 注意：
-        # 這裡刻意使用你「已經測試成功」的 parser。
-        # 不再改成其他 initialCodes parser。
+        # 步驟 2：爬取網站
         # ============================================================
 
         print()
@@ -299,9 +578,7 @@ jobs:
                 'text/html,application/xhtml+xml,'
                 'application/xml;q=0.9,'
                 'image/avif,image/webp,image/apng,'
-                '*/*;q=0.8,'
-                'application/signed-exchange;'
-                'v=b3;q=0.7'
+                '*/*;q=0.8'
             ),
 
             'accept-language': (
@@ -313,8 +590,6 @@ jobs:
 
             'pragma': 'no-cache',
 
-            'priority': 'u=0, i',
-
             'upgrade-insecure-requests': '1'
         }
 
@@ -324,15 +599,14 @@ jobs:
 
         try:
 
-            print(
-                f'🌐 開始請求: {SCRAPE_URL}'
-            )
-
-
             response = requests.get(
+
                 SCRAPE_URL,
+
                 headers=scrape_headers,
-                timeout=20
+
+                timeout=30
+
             )
 
 
@@ -344,25 +618,19 @@ jobs:
 
             if response.status_code != 200:
 
-                message = (
-                    f'❌ 網頁請求失敗，'
-                    f'HTTP {response.status_code}'
+                print(
+                    '❌ 網頁請求失敗'
                 )
-
-                print(message)
-
-                send_discord(message)
 
                 sys.exit(1)
 
 
-            # --------------------------------------------------------
-            # 建立 BeautifulSoup
-            # --------------------------------------------------------
-
             soup = BeautifulSoup(
+
                 response.text,
+
                 'html.parser'
+
             )
 
 
@@ -377,16 +645,20 @@ jobs:
             )
 
 
-            # --------------------------------------------------------
-            # 使用已驗證成功的 initialCodes parser
-            # --------------------------------------------------------
+            # ========================================================
+            # 使用你已經驗證成功的 parser
+            # ========================================================
 
             for script in scripts:
 
                 script_text = (
+
                     script.string
+
                     or script.get_text()
+
                     or ''
+
                 )
 
 
@@ -397,20 +669,13 @@ jobs:
                     continue
 
 
-                print(
-                    '🔍 找到包含 initialCodes '
-                    '的 script。'
-                )
-
-
-                # ----------------------------------------------------
-                # Next.js self.__next_f.push
-                # ----------------------------------------------------
-
                 match = re.search(
+
                     r'self\.__next_f\.push'
                     r'\(\[\d+,\s*\"(.*)\"\s*\]\)',
+
                     script_text
+
                 )
 
 
@@ -420,89 +685,90 @@ jobs:
 
 
                 raw_str = (
+
                     match.group(1)
-                    .replace('\\n', '')
+
+                    .replace(
+                        '\\n',
+                        ''
+                    )
+
                 )
 
 
                 clean_str = (
+
                     raw_str
-                    .replace('\\"', '"')
+
+                    .replace(
+                        '\\"',
+                        '"'
+                    )
+
                     .replace(
                         '"$undefined"',
                         'null'
                     )
+
                 )
 
 
                 try:
 
                     inner_match = re.search(
+
                         r'\{"initialCodes".*?\]\}',
+
                         clean_str
+
                     )
 
 
                     if inner_match:
 
                         actual_content = json.loads(
+
                             inner_match.group(0)
+
                         )
 
 
                         target_json_data = (
+
                             actual_content[
                                 'initialCodes'
                             ]
-                        )
 
-
-                        print(
-                            '✅ 成功提取 initialCodes！'
                         )
 
 
                         break
 
 
-                except Exception as e:
-
-                    print(
-                        f'⚠️ 解析此 script 失敗: {e}'
-                    )
+                except Exception:
 
                     continue
 
 
         except Exception as e:
 
-            message = (
+            print(
                 f'❌ 爬取網頁發生異常: {e}'
             )
-
-            print(message)
-
-            send_discord(message)
 
             sys.exit(1)
 
 
         # ============================================================
-        # 確認抓取結果
+        # 檢查 initialCodes
         # ============================================================
 
         if not target_json_data:
 
-            message = (
-                '❌ 錯誤：無法從網頁中提取 '
-                '`initialCodes` 資料。\n'
-                f'目標網址: {SCRAPE_URL}'
+            print(
+                '❌ 無法從網頁中提取 initialCodes。'
             )
 
-            print(message)
-
-
-            # Debug 資訊
             print(
                 f'📄 HTML 長度: '
                 f'{len(response.text)}'
@@ -513,33 +779,11 @@ jobs:
                 f'{"initialCodes" in response.text}'
             )
 
-
-            send_discord(message)
-
             sys.exit(1)
 
 
         # ============================================================
-        # 顯示完整抓取結果
-        # ============================================================
-
-        print()
-        print(
-            '🎉 【成功提取資料】'
-        )
-
-
-        print(
-            json.dumps(
-                target_json_data,
-                indent=4,
-                ensure_ascii=False
-            )
-        )
-
-
-        # ============================================================
-        # 整理 code
+        # Code list
         # ============================================================
 
         code_list = []
@@ -554,28 +798,25 @@ jobs:
                 continue
 
 
-            raw_code = item.get(
+            code = item.get(
                 'code'
             )
 
 
-            if raw_code is None:
-                continue
-
-
-            code = str(
-                raw_code
-            ).strip().upper()
-
-
             if code:
 
-                code_list.append(
+                code = str(
                     code
-                )
+                ).strip().upper()
 
 
-        # 去除重複
+                if code:
+
+                    code_list.append(
+                        code
+                    )
+
+
         code_list = list(
             dict.fromkeys(
                 code_list
@@ -585,52 +826,20 @@ jobs:
 
         print()
         print(
-            '--- 🌟 兌換碼快速總覽 ---'
+            f'🎉 成功取得 '
+            f'{len(code_list)} 個兌換碼：'
         )
 
 
-        for item in target_json_data:
-
-            if not isinstance(
-                item,
-                dict
-            ):
-                continue
-
-
-            code = item.get(
-                'code',
-                ''
-            )
-
-
-            rewards = item.get(
-                'rewards',
-                ''
-            )
-
+        for code in code_list:
 
             print(
-                f'兌換碼: {code} '
-                f'| 獎勵: {rewards}'
+                f'   🎁 {code}'
             )
-
-
-        print(
-            '------------------------'
-        )
-
-
-        print()
-        print(
-            f'🎯 總共取得 '
-            f'{len(code_list)} 個兌換碼。'
-        )
 
 
         # ============================================================
-        # 步驟 3
-        # 比對歷史紀錄
+        # 步驟 3：比對
         # ============================================================
 
         print()
@@ -653,24 +862,23 @@ jobs:
         if not new_codes:
 
             print(
-                '👌 檢查完畢：'
-                '所有序號都已經存在歷史紀錄。'
+                '👌 今天沒有新序號。'
             )
 
 
             send_discord(
+
                 '👌 **崩壞：星穹鐵道每日排程檢查**\n'
                 '今天沒有新序號。'
+
             )
 
 
             sys.exit(0)
 
 
-        print()
         print(
-            f'🔥 發現 '
-            f'{len(new_codes)} 個新的未記錄序號：'
+            f'🔥 發現 {len(new_codes)} 個新序號：'
         )
 
 
@@ -682,7 +890,7 @@ jobs:
 
 
         # ============================================================
-        # Discord 訊息
+        # 兌換
         # ============================================================
 
         dc_msg = (
@@ -691,15 +899,7 @@ jobs:
         )
 
 
-        # ============================================================
-        # 步驟 3
-        # 每個新序號
-        # ============================================================
-
         for code in new_codes:
-
-            code = code.strip().upper()
-
 
             print()
             print(
@@ -707,7 +907,7 @@ jobs:
             )
 
             print(
-                f'🎁 開始處理序號: {code}'
+                f'🎁 開始處理: {code}'
             )
 
             print(
@@ -715,42 +915,16 @@ jobs:
             )
 
 
-            dc_msg += (
-                f'\n🎁 發現新序號: `{code}`\n'
-            )
-
-
             success_cnt = 0
-
             already_cnt = 0
-
             fail_cnt = 0
 
             log_payloads = []
 
 
-            # ========================================================
-            # 每個帳號
-            # ========================================================
-
             for idx, acc in enumerate(
                 user_accounts
             ):
-
-
-                if not isinstance(
-                    acc,
-                    dict
-                ):
-
-                    print(
-                        f'⚠️ 第 {idx + 1} 筆帳號資料格式錯誤，'
-                        '跳過。'
-                    )
-
-                    fail_cnt += 1
-
-                    continue
 
 
                 uid = str(
@@ -777,17 +951,10 @@ jobs:
                 ).strip()
 
 
-                # ----------------------------------------------------
-                # 檢查 UID / Cookie
-                # ----------------------------------------------------
-
-                if (
-                    not uid
-                    or not user_cookie
-                ):
+                if not uid or not user_cookie:
 
                     print(
-                        f'⚠️ 第 {idx + 1} 筆資料缺少 '
+                        f'⚠️ 第 {idx + 1} 筆帳號缺少 '
                         'UID 或 Cookie，跳過。'
                     )
 
@@ -796,25 +963,16 @@ jobs:
                     continue
 
 
-                # ----------------------------------------------------
-                # 帳號間冷卻
-                # ----------------------------------------------------
-
                 if idx > 0:
 
                     print(
-                        '⏳ 切換帳號，'
-                        '等待 6 秒...'
+                        '⏳ 等待 6 秒...'
                     )
 
                     time.sleep(6)
 
 
-                # ----------------------------------------------------
-                # API Headers
-                # ----------------------------------------------------
-
-                api_headers = {
+                headers = {
 
                     'accept': '*/*',
 
@@ -825,62 +983,54 @@ jobs:
 
                     'cache-control': 'no-cache',
 
-                    'content-type': (
-                        'application/json'
-                    ),
+                    'content-type':
+                        'application/json',
 
                     'pragma': 'no-cache',
 
                     'cookie': user_cookie,
 
-                    'Referer': (
-                        'https://hsr.hoyoverse.com/'
-                    ),
+                    'Referer':
+                        'https://hsr.hoyoverse.com/',
 
-                    'User-Agent': (
+                    'User-Agent':
                         'Mozilla/5.0 '
                         '(Windows NT 10.0; Win64; x64) '
                         'AppleWebKit/537.36 '
                         '(KHTML, like Gecko) '
-                        'Chrome/120.0.0.0 '
-                        'Safari/537.36'
-                    )
+                        'Chrome/120.0 Safari/537.36'
                 }
-
-
-                # ----------------------------------------------------
-                # Payload
-                # ----------------------------------------------------
-
-                current_timestamp = int(
-                    time.time() * 1000
-                )
 
 
                 payload = {
 
-                    't': current_timestamp,
+                    't':
+                        int(
+                            time.time() * 1000
+                        ),
 
-                    'lang': 'zh-tw',
+                    'lang':
+                        'zh-tw',
 
-                    'game_biz': 'hkrpg_global',
+                    'game_biz':
+                        'hkrpg_global',
 
-                    'uid': uid,
+                    'uid':
+                        uid,
 
-                    'region': 'prod_official_asia',
+                    'region':
+                        'prod_official_asia',
 
-                    'cdkey': code,
+                    'cdkey':
+                        code,
 
-                    'platform': '4',
+                    'platform':
+                        '4',
 
-                    'device_uuid': device_uuid
-
+                    'device_uuid':
+                        device_uuid
                 }
 
-
-                # ----------------------------------------------------
-                # 呼叫兌換 API
-                # ----------------------------------------------------
 
                 try:
 
@@ -888,7 +1038,7 @@ jobs:
 
                         EXCHANGE_API_URL,
 
-                        headers=api_headers,
+                        headers=headers,
 
                         json=payload,
 
@@ -900,25 +1050,15 @@ jobs:
                     res_text = res.text
 
 
-                    print(
-                        f'📡 帳號 {uid}: '
-                        f'HTTP {res.status_code}'
-                    )
-
-
                     if res.status_code == 200:
 
                         try:
 
                             res_json = res.json()
 
-                        except ValueError:
+                        except Exception:
 
                             res_json = {}
-
-                            print(
-                                '⚠️ API 回傳不是 JSON'
-                            )
 
 
                         retcode = res_json.get(
@@ -935,50 +1075,40 @@ jobs:
                         )
 
 
-                        # ------------------------------------------------
-                        # 成功
-                        # ------------------------------------------------
-
                         if retcode == 0:
 
                             success_cnt += 1
 
                             print(
                                 f'✅ 帳號 {uid}: '
-                                '兌換成功！'
+                                '兌換成功'
                             )
 
 
-                        # ------------------------------------------------
-                        # 已經領取
-                        # ------------------------------------------------
-
                         elif (
+
                             retcode == -2017
+
                             or 'already'
                             in msg.lower()
+
                         ):
 
                             already_cnt += 1
 
                             print(
                                 f'ℹ️ 帳號 {uid}: '
-                                '以前就已經領取過'
+                                '以前已領取'
                             )
 
-
-                        # ------------------------------------------------
-                        # 其他失敗
-                        # ------------------------------------------------
 
                         else:
 
                             fail_cnt += 1
 
                             print(
-                                f'❌ 帳號 {uid} 失敗 '
-                                f'(retcode: {retcode}, '
-                                f'msg: {msg})'
+                                f'❌ 帳號 {uid}: '
+                                f'{retcode} / {msg}'
                             )
 
 
@@ -987,24 +1117,24 @@ jobs:
                         fail_cnt += 1
 
                         print(
-                            f'❌ 帳號 {uid} 請求失敗 '
-                            f'(HTTP {res.status_code})'
+                            f'❌ 帳號 {uid}: '
+                            f'HTTP {res.status_code}'
                         )
 
 
-                    # --------------------------------------------------
-                    # Log
-                    # --------------------------------------------------
-
                     log_payloads.append({
 
-                        'code': code,
+                        'code':
+                            code,
 
-                        'userId': uid,
+                        'userId':
+                            uid,
 
-                        'resCode': res.status_code,
+                        'resCode':
+                            res.status_code,
 
-                        'resText': res_text
+                        'resText':
+                            res_text
 
                     })
 
@@ -1014,112 +1144,110 @@ jobs:
                     fail_cnt += 1
 
                     print(
-                        f'❌ 帳號 {uid} '
-                        f'連線異常: {err}'
+                        f'❌ 帳號 {uid}: '
+                        f'{err}'
                     )
 
 
                     log_payloads.append({
 
-                        'code': code,
+                        'code':
+                            code,
 
-                        'userId': uid,
+                        'userId':
+                            uid,
 
-                        'resCode': 'Exception',
+                        'resCode':
+                            'Exception',
 
-                        'resText': str(err)
+                        'resText':
+                            str(err)
 
                     })
 
 
             # ========================================================
-            # 本序號結果
+            # Discord summary
             # ========================================================
 
             dc_msg += (
-                f'   ➔ 👥 帳號憑證總數: '
-                f'**{len(user_accounts)}** 組\n'
-            )
 
-            dc_msg += (
-                f'   ➔ 🎉 新成功: '
+                f'\n🎁 `{code}`\n'
+
+                f'👥 帳號數: '
+                f'**{len(user_accounts)}**\n'
+
+                f'🎉 成功: '
                 f'**{success_cnt}**\n'
-            )
 
-            dc_msg += (
-                f'   ➔ 📝 以前已領過: '
+                f'📝 已領取: '
                 f'**{already_cnt}**\n'
-            )
 
-            dc_msg += (
-                f'   ➔ ❌ 失敗: '
+                f'❌ 失敗: '
                 f'**{fail_cnt}**\n'
+
             )
 
 
             # ========================================================
-            # 寫入 Google Sheet
+            # Google Sheet
             # ========================================================
 
             print()
             print(
-                f'💾 正在將紀錄同步寫回 Google 試算表 '
-                f'({code})...'
+                f'💾 寫入 Google Sheet: {code}'
             )
 
 
-            try:
+            code_ok = post_gas({
 
-                add_code_response = requests.post(
+                'action':
+                    'addCode',
 
-                    GAS_WEB_URL,
+                'code':
+                    code
 
-                    json={
-                        'action': 'addCode',
-                        'code': code
-                    },
-
-                    timeout=10
-
-                )
+            })
 
 
-                print(
-                    f'   addCode HTTP: '
-                    f'{add_code_response.status_code}'
-                )
+            log_ok = post_gas({
+
+                'action':
+                    'addLog',
+
+                'logs':
+                    log_payloads
+
+            })
 
 
-                add_log_response = requests.post(
-
-                    GAS_WEB_URL,
-
-                    json={
-                        'action': 'addLog',
-                        'logs': log_payloads
-                    },
-
-                    timeout=10
-
-                )
-
+            if code_ok:
 
                 print(
-                    f'   addLog HTTP: '
-                    f'{add_log_response.status_code}'
+                    '✅ addCode 成功'
+                )
+
+            else:
+
+                print(
+                    '❌ addCode 失敗'
                 )
 
 
-            except Exception as sheet_err:
+            if log_ok:
 
                 print(
-                    f'⚠️ Google 試算表寫入失敗: '
-                    f'{sheet_err}'
+                    '✅ addLog 成功'
+                )
+
+            else:
+
+                print(
+                    '❌ addLog 失敗'
                 )
 
 
         # ============================================================
-        # 步驟 4
         # Discord
         # ============================================================
 
@@ -1129,53 +1257,13 @@ jobs:
         )
 
 
-        if DISCORD_WEBHOOK_URL:
-
-            try:
-
-                discord_response = requests.post(
-
-                    DISCORD_WEBHOOK_URL,
-
-                    json={
-                        'content': dc_msg
-                    },
-
-                    timeout=10
-
-                )
-
-
-                if discord_response.status_code < 400:
-
-                    print(
-                        '✅ 兌換通知已成功送至 Discord。'
-                    )
-
-                else:
-
-                    print(
-                        f'❌ Discord HTTP '
-                        f'{discord_response.status_code}'
-                    )
-
-
-            except Exception as e:
-
-                print(
-                    f'❌ Discord 通知發送失敗: {e}'
-                )
-
-        else:
-
-            print(
-                'ℹ️ 未設定 Discord Webhook，'
-                '略過通知。'
-            )
+        send_discord(
+            dc_msg
+        )
 
 
         # ============================================================
-        # 完成
+        # Finish
         # ============================================================
 
         print()
