@@ -136,7 +136,7 @@ jobs:
                             print(f'✅ 帳號 {user_id} 兌換成功')
                             try:
                                 datab_list = res_b.json()
-                                if item.get('errorCode', '').strip() == 'active':
+                                if item.get('errorCode', '').strip() == 'AlreadyUsed':
                                     used += 1
                             except Exception as errr:
                                 print(f'❌ A-API 連線或解析 JSON 異常: {errr}')
