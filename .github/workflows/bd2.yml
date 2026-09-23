@@ -29,7 +29,7 @@ jobs:
         DISCORD_WEBHOOK_URL: \${{ secrets.DISCORD_WEBHOOK_URL }}
       run: |
         cat << 'EOF' > run.py
-        import os, requests, json, time, sys, re
+        import os, requests, json, time, sys
 
         # 🧼 終極字元清洗函式：徹底消滅所有被 GitHub 環境誤加的反斜線、引號與前後空格
         def clean_secret(val):
@@ -61,7 +61,7 @@ jobs:
             print('⚠️ 警告：試算表中的「帳號列表」是空的，請先填入 userId。')
             sys.exit(0)
 
-        print('\n=== 步驟 2: 開始抓取網頁並解析序號 ===')
+        print('\n=== 步驟 2: 開始呼叫 A-API 獲取序號 JSON ===')
         headers_a = {
             'accept': '*/*',
             'accept-language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7,zh-CN;q=0.6',
@@ -84,12 +84,13 @@ jobs:
                 print(f'❌ A-API 回傳錯誤內容: {raw_text[:500]}')
                 sys.exit(1)
             
-            # 🔍 智慧相容檢查：如果內容為空、或者是特定的非 JSON 成功字串
+            # 🔍 智慧相容檢查
             if not raw_text or raw_text in ['"OK"', 'OK', '[]', '"No codes available"']:
-                print('👌 官方目前沒有任何可用的 active 序號（回傳內容為空或無序號標籤）。')
+                print('👌 官方目前沒有任何可用的 active 序號。')
                 data_list = []
             else:
                 data_list = res_a.json()
+                print(f'成功獲取 API 陣列資料，共有 {len(data_list)} 筆序號明細。')
                 
         except Exception as e:
             print(f'❌ A-API 連線或解析 JSON 異常: {e}')
@@ -97,13 +98,15 @@ jobs:
 
         print('\n=== 步驟 3: 開始比對序號與發送 B-API ===')
         has_new = False
-        dc_msg = '🤖 **棕色塵埃2 序號兌換回報 (GitHub爬蟲版)**\n'
+        dc_msg = '🤖 **棕色塵埃2 序號兌換回報 (GitHub純API版)**\n'
 
-        for code in found_codes:
-            code = code.strip()
+        # 🛠️ 修正點：改回輪詢標準 API 的 data_list 陣列
+        for item in data_list:
+            code = item.get('code', '').strip()
+            status = item.get('status', '').strip()
             
-            # 比對歷史紀錄：如果是全新未發送過的 Code 才執行
-            if code not in sent_codes:
+            # 比對：如果狀態是 active 且沒發送過
+            if status == 'active' and code not in sent_codes:
                 has_new = True
                 print(f'🎉 發現未發送過的新序號: {code}')
                 dc_msg += f'\n🎁 發現新序號: `{code}`\n'
@@ -119,8 +122,8 @@ jobs:
                         'accept': '*/*',
                         'accept-language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7,zh-CN;q=0.6',
                         'cache-control': 'no-cache',
-                        'origin': 'https://pmang.cloud',
-                        'referer': 'https://pmang.cloud/',
+                        'origin': 'https://redeem.bd2.pmang.cloud',
+                        'referer': 'https://redeem.bd2.pmang.cloud/',
                         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36'
                     }
                     payload_b = {'appId': 'bd2-live', 'userId': user_id, 'code': code}
