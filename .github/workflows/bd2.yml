@@ -2,8 +2,8 @@ name: BD2 Coupon Automation
 
 on:
   schedule:
-    - cron: '0 1 * * *'
-  workflow_dispatch: # 允許手動點擊執行測試
+    - cron: '0 1 * * *' # 每天台灣時間早上 09:00 自動執行
+  workflow_dispatch: # 允許在網頁上手動點擊執行測試
 
 jobs:
   run-automation:
@@ -24,19 +24,44 @@ jobs:
 
     - name: Run script
       env:
-        X_API_KEY: ${{ secrets.X_API_KEY }}
-        GAS_WEB_URL: ${{ secrets.GAS_WEB_URL }}
-        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        X_API_KEY: \${{ secrets.X_API_KEY }}
+        GAS_WEB_URL: \${{ secrets.GAS_WEB_URL }}
+        DISCORD_WEBHOOK_URL: \${{ secrets.DISCORD_WEBHOOK_URL }}
       run: |
         cat << 'EOF' > run.py
-        import os, requests, json, sys
+        import os, requests, json, time, sys, re
 
+        # 🧼 終極字元清洗函式：徹底消滅所有被 GitHub 環境誤加的反斜線、引號與前後空格
         def clean_secret(val):
             if not val: return ""
-            return val.strip().strip('\\').strip("'").strip('"').strip()
+            cleaned = val.strip().strip('\\').strip("'").strip('"').strip()
+            if "http" in cleaned and cleaned.startswith("\\"):
+                cleaned = cleaned.lstrip("\\")
+            return cleaned
 
         X_API_KEY = clean_secret(os.getenv('X_API_KEY', ''))
-        
+        GAS_WEB_URL = clean_secret(os.getenv('GAS_WEB_URL', ''))
+        DISCORD_WEBHOOK_URL = clean_secret(os.getenv('DISCORD_WEBHOOK_URL', ''))
+
+        print('=== 步驟 1: 開始讀取 Google 試算表 ===')
+        try:
+            gas_res = requests.get(f'{GAS_WEB_URL}?action=getData')
+            if 'html' in gas_res.text.lower():
+                print('❌ 錯誤：Google 試算表回傳了 HTML 網頁！請確認 Apps Script 部署時存取權是否有設為「所有人 (Anyone)」。')
+                sys.exit(1)
+            data = gas_res.json()
+            sent_codes = data.get('sentCodes', [])
+            user_ids = data.get('userIds', [])
+            print(f'成功讀取到 {len(user_ids)} 個遊戲帳號。')
+        except Exception as e:
+            print(f'❌ 讀取試算表發生異常崩潰: {e}')
+            sys.exit(1)
+
+        if not user_ids:
+            print('⚠️ 警告：試算表中的「帳號列表」是空的，請先填入 userId。')
+            sys.exit(0)
+
+        print('\n=== 步驟 2: 開始抓取網頁並解析序號 ===')
         headers_a = {
             'accept': '*/*',
             'accept-language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7,zh-CN;q=0.6',
@@ -49,27 +74,76 @@ jobs:
             'x-api-key': X_API_KEY
         }
 
-        print('🔍 === 【A-API 照妖鏡測試模式】 === 🔍\n')
-
-        # 🧪 測試 A：使用 GET 請求
-        print('👉 嘗試 1：使用 [GET] 方式呼叫 A-API...')
         try:
-            res_get = requests.get('https://thebd2pulse.com', headers=headers_a, timeout=10)
-            print(f'   ➔ 回應狀態碼: {res_get.status_code}')
-            print(f'   ➔ 回傳真實內容 (前200字): 【{res_get.text.strip()}】\n')
+            res_a = requests.get('https://thebd2pulse.com', headers=headers_a)
+            html_content = res_a.text
+            
+            # 🔍 使用正則表達式，精準抓取官方 HTML 網頁底層備用區塊中 <code> 標籤內的所有序號
+            raw_codes = re.findall(r'<code>([A-Z0-9_]+)</code>', html_content)
+            found_codes = list(set(raw_codes)) # 去除重複抓到的 code
+            print(f'成功從網頁中解析出 {len(found_codes)} 組潛在序號: {found_codes}')
         except Exception as e:
-            print(f'   ➔ [GET] 發生連線異常: {e}\n')
+            print(f'❌ 網頁抓取或正則解析異常: {e}')
+            sys.exit(1)
 
-        # 🧪 測試 B：使用 POST 請求（帶空 Body）
-        print('👉 嘗試 2：使用 [POST] 方式呼叫 A-API...')
-        try:
-            res_post = requests.post('https://thebd2pulse.com', headers=headers_a, json={}, timeout=10)
-            print(f'   ➔ 回應狀態碼: {res_post.status_code}')
-            print(f'   ➔ 回傳真實內容 (前200字): 【{res_post.text.strip()}】\n')
-        except Exception as e:
-            print(f'   ➔ [POST] 發生連線異常: {e}\n')
+        print('\n=== 步驟 3: 開始比對序號與發送 B-API ===')
+        has_new = False
+        dc_msg = '🤖 **棕色塵埃2 序號兌換回報 (GitHub爬蟲版)**\n'
 
-        print('🏁 測試探測完畢，強制結束，等待比對結果。')
-        sys.exit(0)
+        for code in found_codes:
+            code = code.strip()
+            
+            # 比對歷史紀錄：如果是全新未發送過的 Code 才執行
+            if code not in sent_codes:
+                has_new = True
+                print(f'🎉 發現未發送過的新序號: {code}')
+                dc_msg += f'\n🎁 發現新序號: `{code}`\n'
+                success, fail = 0, 0
+                log_payloads = []
+
+                for idx, user_id in enumerate(user_ids):
+                    if idx > 0:
+                        print('⏳ 安全機制：暫停 5 秒鐘...')
+                        time.sleep(5)
+
+                    headers_b = {
+                        'accept': '*/*',
+                        'accept-language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7,zh-CN;q=0.6',
+                        'cache-control': 'no-cache',
+                        'origin': 'https://pmang.cloud',
+                        'referer': 'https://pmang.cloud/',
+                        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36'
+                    }
+                    payload_b = {'appId': 'bd2-live', 'userId': user_id, 'code': code}
+
+                    try:
+                        res_b = requests.post('https://amazonaws.com', headers=headers_b, json=payload_b)
+                        log_payloads.append({'code': code, 'userId': user_id, 'resCode': res_b.status_code, 'resText': res_b.text[:200]})
+                        if res_b.status_code == 200: 
+                            success += 1
+                            print(f'✅ 帳號 {user_id} 兌換成功')
+                        else: 
+                            fail += 1
+                            print(f'❌ 帳號 {user_id} 失敗: {res_b.status_code} - {res_b.text}')
+                    except Exception as err:
+                        log_payloads.append({'code': code, 'userId': user_id, 'resCode': 'Exception', 'resText': str(err)})
+                        fail += 1
+                        print(f'❌ 帳號 {user_id} 連線例外: {err}')
+
+                dc_msg += f'   ➔ 兌換結果：**{success}** 成功 / **{fail}** 失敗\n'
+                
+                print('💾 正在將紀錄同步寫回 Google 試算表...')
+                requests.post(GAS_WEB_URL, json={'action': 'addCode', 'code': code})
+                requests.post(GAS_WEB_URL, json={'action': 'addLog', 'logs': log_payloads})
+
+        print('\n=== 步驟 4: 發送 Discord 通知 ===')
+        if has_new and DISCORD_WEBHOOK_URL:
+            requests.post(DISCORD_WEBHOOK_URL, json={'content': dc_msg})
+            print('通知已發送至 Discord。')
+        elif DISCORD_WEBHOOK_URL:
+            requests.post(DISCORD_WEBHOOK_URL, json={'content': '👌 **每日排程檢查**：今天沒有新序號。'})
+            print('無新序號，已發送報平安通知。')
+        
+        print('🏁 全流程執行完畢！')
         EOF
         python run.py
