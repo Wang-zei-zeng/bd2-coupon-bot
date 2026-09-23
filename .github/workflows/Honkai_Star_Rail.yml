@@ -29,10 +29,10 @@ jobs:
         python -m pip install --upgrade pip
         pip install requests beautifulsoup4
 
-    # 4. 直接執行內嵌的 Python 程式碼並 Print 結果
+    # 4. 使用 EOF 多行輸入執行 Python，徹底解決引號衝突問題
     - name: Run Python Scraper and Print Data
       run: |
-        python -c "
+        python << 'EOF'
         import re
         import json
         import requests
@@ -41,6 +41,7 @@ jobs:
         # 請將此處替換為你實際要爬的目標網址
         url = 'https://example.com' 
         headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
             'accept-language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
             'cache-control': 'no-cache',
@@ -49,10 +50,10 @@ jobs:
             'upgrade-insecure-requests': '1'
         }
 
-        print(f'=== 開始請求網頁: {url} ===')
+        print(f"=== 開始請求網頁: {url} ===")
         response = requests.get(url, headers=headers)
         if response.status_code != 200:
-            print(f'❌ 網頁請求失敗，狀態碼: {response.status_code}')
+            print(f"❌ 網頁請求失敗，狀態碼: {response.status_code}")
             exit(1)
 
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -63,11 +64,11 @@ jobs:
             if script.string and 'initialCodes' in script.string:
                 match = re.search(r'self\.__next_f\.push\(\[\d+,\s*\"(.*)\"\s*\]\)', script.string)
                 if match:
-                    raw_str = match.group(1).replace('\\\\n', '')
-                    clean_str = raw_str.replace('\\\\\"', '\"').replace('\"$undefined\"', 'null')
+                    raw_str = match.group(1).replace('\\n', '')
+                    clean_str = raw_str.replace('\\"', '"').replace('"$undefined"', 'null')
                     
                     try:
-                        inner_match = re.search(r'\{"initialCodes\".*?\]\}', clean_str)
+                        inner_match = re.search(r'\{"initialCodes".*?\]\}', clean_str)
                         if inner_match:
                             actual_content = json.loads(inner_match.group(0))
                             target_json_data = actual_content['initialCodes']
@@ -81,8 +82,8 @@ jobs:
             
             print('\n--- 🌟 兌換碼快速總覽 ---')
             for code_info in target_json_data:
-                print(f'兌換碼: {code_info[\"code\"]} | 獎勵: {code_info[\"rewards\"]}')
+                print(f"兌換碼: {code_info['code']} | 獎勵: {code_info['rewards']}")
             print('------------------------')
         else:
             print('❌ 錯誤：找不到目標 initialCodes 資料，請檢查網頁結構。')
-        "
+        EOF
