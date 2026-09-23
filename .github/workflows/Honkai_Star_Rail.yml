@@ -1,0 +1,88 @@
+name: Auto Run Web Scraper
+
+on:
+  push:
+    branches:
+      - main  # 當你 push 到 main 分支時會觸發一次
+  schedule:
+    - cron: '0 0 * * *'  # 每天台灣時間早上 08:00 自動執行一次
+  workflow_dispatch:     # 允許你在 GitHub 網頁上手動點擊按鈕執行
+
+jobs:
+  scrape_job:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. 複製 GitHub 儲存庫環境
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # 2. 設定 Python 環境
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    # 3. 安裝爬蟲需要的套件
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests beautifulsoup4
+
+    # 4. 直接執行內嵌的 Python 程式碼並 Print 結果
+    - name: Run Python Scraper and Print Data
+      run: |
+        python -c "
+        import re
+        import json
+        import requests
+        from bs4 import BeautifulSoup
+
+        # 請將此處替換為你實際要爬的目標網址
+        url = 'https://example.com' 
+        headers = {
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'accept-language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+            'cache-control': 'no-cache',
+            'pragma': 'no-cache',
+            'priority': 'u=0, i',
+            'upgrade-insecure-requests': '1'
+        }
+
+        print(f'=== 開始請求網頁: {url} ===')
+        response = requests.get(url, headers=headers)
+        if response.status_code != 200:
+            print(f'❌ 網頁請求失敗，狀態碼: {response.status_code}')
+            exit(1)
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+        scripts = soup.find_all('script')
+        target_json_data = None
+
+        for script in scripts:
+            if script.string and 'initialCodes' in script.string:
+                match = re.search(r'self\.__next_f\.push\(\[\d+,\s*\"(.*)\"\s*\]\)', script.string)
+                if match:
+                    raw_str = match.group(1).replace('\\\\n', '')
+                    clean_str = raw_str.replace('\\\\\"', '\"').replace('\"$undefined\"', 'null')
+                    
+                    try:
+                        inner_match = re.search(r'\{"initialCodes\".*?\]\}', clean_str)
+                        if inner_match:
+                            actual_content = json.loads(inner_match.group(0))
+                            target_json_data = actual_content['initialCodes']
+                            break
+                    except Exception as e:
+                        pass
+
+        if target_json_data:
+            print('\n🎉 【成功提取資料】詳細內容如下：\n')
+            print(json.dumps(target_json_data, indent=4, ensure_ascii=False))
+            
+            print('\n--- 🌟 兌換碼快速總覽 ---')
+            for code_info in target_json_data:
+                print(f'兌換碼: {code_info[\"code\"]} | 獎勵: {code_info[\"rewards\"]}')
+            print('------------------------')
+        else:
+            print('❌ 錯誤：找不到目標 initialCodes 資料，請檢查網頁結構。')
+        "
