@@ -31,13 +31,9 @@ jobs:
         cat << 'EOF' > run.py
         import os, requests, json, time, sys
 
-        # 🧼 終極字元清洗函式：徹底消滅所有被 GitHub 誤加的反斜線、引號與前後空格
         def clean_secret(val):
-            if not val:
-                return ""
-            # 重複清洗，直到前後沒有任何反斜線、單雙引號和空格
+            if not val: return ""
             cleaned = val.strip().strip('\\').strip("'").strip('"').strip()
-            # 針對網址內部的特殊防錯處理
             if "http" in cleaned and cleaned.startswith("\\"):
                 cleaned = cleaned.lstrip("\\")
             return cleaned
@@ -47,17 +43,11 @@ jobs:
         DISCORD_WEBHOOK_URL = clean_secret(os.getenv('DISCORD_WEBHOOK_URL', ''))
 
         print('=== 步驟 1: 開始讀取 Google 試算表 ===')
-        # 除錯列印：確認清洗後的網址開頭
-        print(f'⚙️ 清洗後的網址安全檢驗 (前20字): {GAS_WEB_URL[:20]}')
-        
         try:
             gas_res = requests.get(f'{GAS_WEB_URL}?action=getData')
-            print(f'試算表回應狀態碼: {gas_res.status_code}')
-            
             if 'html' in gas_res.text.lower():
                 print('❌ 錯誤：Google 試算表回傳了 HTML 網頁！請確認 Apps Script 部署時存取權是否有設為「所有人 (Anyone)」。')
                 sys.exit(1)
-                
             data = gas_res.json()
             sent_codes = data.get('sentCodes', [])
             user_ids = data.get('userIds', [])
@@ -67,8 +57,8 @@ jobs:
             sys.exit(1)
 
         if not user_ids:
-            print('⚠️ 警告：試算表中的「帳號列表」是空的，請先確認工作表名稱是否叫「帳號列表」並填入 userId。')
-            exit(0)
+            print('⚠️ 警告：試算表中的「帳號列表」是空的，請先填入 userId。')
+            sys.exit(0)
 
         print('\n=== 步驟 2: 開始呼叫 A-API 獲取序號 ===')
         headers_a = {
@@ -86,10 +76,20 @@ jobs:
         try:
             res_a = requests.get('https://thebd2pulse.com', headers=headers_a)
             print(f'A-API 回應狀態碼: {res_a.status_code}')
+            raw_text = res_a.text.strip()
+            print(f'📄 A-API 回傳原始內容 (前100字): {raw_text[:100]}')
+            
             if res_a.status_code != 200:
-                print(f'❌ A-API 回傳錯誤內容: {res_a.text[:500]}')
+                print(f'❌ A-API 回傳錯誤內容: {raw_text[:500]}')
                 sys.exit(1)
-            data_list = res_a.json()
+            
+            # 🔍 智慧相容檢查：如果內容為空、或者是特定的非 JSON 成功字串
+            if not raw_text or raw_text in ['"OK"', 'OK', '[]', '"No codes available"']:
+                print('👌 官方目前沒有任何可用的 active 序號（回傳內容為空或無序號標籤）。')
+                data_list = []
+            else:
+                data_list = res_a.json()
+                
         except Exception as e:
             print(f'❌ A-API 連線或解析 JSON 異常: {e}')
             sys.exit(1)
@@ -98,49 +98,52 @@ jobs:
         has_new = False
         dc_msg = '🤖 **棕色塵埃2 序號兌換回報 (GitHub版)**\n'
 
-        for item in data_list:
-            code = item.get('code', '').strip()
-            if item.get('status') == 'active' and code not in sent_codes:
-                has_new = True
-                print(f'🎉 發現未發送過的新序號: {code}')
-                dc_msg += f'\n🎁 發現新序號: `{code}`\n'
-                success, fail = 0, 0
-                log_payloads = []
+        if isinstance(data_list, list):
+            for item in data_list:
+                code = item.get('code', '').strip()
+                if item.get('status') == 'active' and code not in sent_codes:
+                    has_new = True
+                    print(f'🎉 發現未發送過的新序號: {code}')
+                    dc_msg += f'\n🎁 發現新序號: `{code}`\n'
+                    success, fail = 0, 0
+                    log_payloads = []
 
-                for idx, user_id in enumerate(user_ids):
-                    if idx > 0:
-                        print('⏳ 安全機制：暫停 5 秒...')
-                        time.sleep(5)
+                    for idx, user_id in enumerate(user_ids):
+                        if idx > 0:
+                            print('⏳ 安全機制：暫停 5 秒...')
+                            time.sleep(5)
 
-                    headers_b = {
-                        'accept': '*/*',
-                        'accept-language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7,zh-CN;q=0.6',
-                        'cache-control': 'no-cache',
-                        'origin': 'https://pmang.cloud',
-                        'referer': 'https://pmang.cloud/',
-                        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36'
-                    }
-                    payload_b = {'appId': 'bd2-live', 'userId': user_id, 'code': code}
+                        headers_b = {
+                            'accept': '*/*',
+                            'accept-language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7,zh-CN;q=0.6',
+                            'cache-control': 'no-cache',
+                            'origin': 'https://pmang.cloud',
+                            'referer': 'https://pmang.cloud/',
+                            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36'
+                        }
+                        payload_b = {'appId': 'bd2-live', 'userId': user_id, 'code': code}
 
-                    try:
-                        res_b = requests.post('https://amazonaws.com', headers=headers_b, json=payload_b)
-                        log_payloads.append({'code': code, 'userId': user_id, 'resCode': res_b.status_code, 'resText': res_b.text[:200]})
-                        if res_b.status_code == 200: 
-                            success += 1
-                            print(f'✅ 帳號 {user_id} 兌換成功')
-                        else: 
+                        try:
+                            res_b = requests.post('https://amazonaws.com', headers=headers_b, json=payload_b)
+                            log_payloads.append({'code': code, 'userId': user_id, 'resCode': res_b.status_code, 'resText': res_b.text[:200]})
+                            if res_b.status_code == 200: 
+                                success += 1
+                                print(f'✅ 帳號 {user_id} 兌換成功')
+                            else: 
+                                fail += 1
+                                print(f'❌ 帳號 {user_id} 失敗: {res_b.status_code} - {res_b.text}')
+                        except Exception as err:
+                            log_payloads.append({'code': code, 'userId': user_id, 'resCode': 'Exception', 'resText': str(err)})
                             fail += 1
-                            print(f'❌ 帳號 {user_id} 失敗: {res_b.status_code} - {res_b.text}')
-                    except Exception as err:
-                        log_payloads.append({'code': code, 'userId': user_id, 'resCode': 'Exception', 'resText': str(err)})
-                        fail += 1
-                        print(f'❌ 帳號 {user_id} 連線例外: {err}')
+                            print(f'❌ 帳號 {user_id} 連線例外: {err}')
 
-                dc_msg += f'   ➔ 兌換結果：**{success}** 成功 / **{fail}** 失敗\n'
-                
-                print('💾 正在將紀錄寫回 Google 試算表...')
-                requests.post(GAS_WEB_URL, json={'action': 'addCode', 'code': code})
-                requests.post(GAS_WEB_URL, json={'action': 'addLog', 'logs': log_payloads})
+                    dc_msg += f'   ➔ 兌換結果：**{success}** 成功 / **{fail}** 失敗\n'
+                    
+                    print('💾 正在將紀錄寫回 Google 試算表...')
+                    requests.post(GAS_WEB_URL, json={'action': 'addCode', 'code': code})
+                    requests.post(GAS_WEB_URL, json={'action': 'addLog', 'logs': log_payloads})
+        else:
+            print('ℹ️ 收到非陣列格式的資料，跳過 B-API 比對階段。')
 
         print('\n=== 步驟 4: 發送 Discord 通知 ===')
         if has_new and DISCORD_WEBHOOK_URL:
