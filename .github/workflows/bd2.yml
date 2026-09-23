@@ -76,14 +76,23 @@ jobs:
 
         try:
             res_a = requests.get('https://api.thebd2pulse.com/redeem', headers=headers_a)
-            html_content = res_a.text
+            print(f'A-API 回應狀態碼: {res_a.status_code}')
+            raw_text = res_a.text.strip()
+            print(f'📄 A-API 回傳原始內容 (前100字): {raw_text[:100]}')
             
-            # 🔍 使用正則表達式，精準抓取官方 HTML 網頁底層備用區塊中 <code> 標籤內的所有序號
-            raw_codes = re.findall(r'<code>([A-Z0-9_]+)</code>', html_content)
-            found_codes = list(set(raw_codes)) # 去除重複抓到的 code
-            print(f'成功從網頁中解析出 {len(found_codes)} 組潛在序號: {found_codes}')
+            if res_a.status_code != 200:
+                print(f'❌ A-API 回傳錯誤內容: {raw_text[:500]}')
+                sys.exit(1)
+            
+            # 🔍 智慧相容檢查：如果內容為空、或者是特定的非 JSON 成功字串
+            if not raw_text or raw_text in ['"OK"', 'OK', '[]', '"No codes available"']:
+                print('👌 官方目前沒有任何可用的 active 序號（回傳內容為空或無序號標籤）。')
+                data_list = []
+            else:
+                data_list = res_a.json()
+                
         except Exception as e:
-            print(f'❌ 網頁抓取或正則解析異常: {e}')
+            print(f'❌ A-API 連線或解析 JSON 異常: {e}')
             sys.exit(1)
 
         print('\n=== 步驟 3: 開始比對序號與發送 B-API ===')
