@@ -131,23 +131,26 @@ jobs:
 
                     try:
                         res_b = requests.post('https://loj2urwaua.execute-api.ap-northeast-1.amazonaws.com/prod/coupon', headers=headers_b, json=payload_b)
-                        log_payloads.append({'code': code, 'userId': user_id, 'resCode': res_b.status_code, 'resText': res_b.text})
                         if res_b.status_code == 200: 
                             success += 1
                             print(f'✅ 帳號 {user_id} 兌換成功')
                             try:
                                 datab_list = res_b.json()
+                                if item.get('errorCode', '').strip() == 'active':
+                                    used += 1
                             except Exception as errr:
                                 print(f'❌ A-API 連線或解析 JSON 異常: {errr}')
                         else: 
                             fail += 1
                             print(f'❌ 帳號 {user_id} 失敗: {res_b.status_code} - {res_b.text}')
+                            
+                        log_payloads.append({'code': code, 'userId': user_id, 'resCode': res_b.status_code, 'resText': res_b.text})
                     except Exception as err:
                         log_payloads.append({'code': code, 'userId': user_id, 'resCode': 'Exception', 'resText': str(err)})
                         fail += 1
                         print(f'❌ 帳號 {user_id} 連線例外: {err}')
 
-                dc_msg += f'   ➔ 兌換結果：**{success}** 成功 / **{fail}** 失敗\n'
+                dc_msg += f'   ➔ 兌換結果：**{success}** 成功 / **{fail}** 失敗 / **{used}** 使用過\n'
                 
                 print('💾 正在將紀錄同步寫回 Google 試算表...')
                 requests.post(GAS_WEB_URL, json={'action': 'addCode', 'code': code})
