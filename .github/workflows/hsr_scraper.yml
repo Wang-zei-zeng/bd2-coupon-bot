@@ -66,7 +66,7 @@ jobs:
             sent_codes = data.get('sentCodes', [])
             print(f'📊 試算表歷史已兌換序號共 {len(sent_codes)} 筆。')
         except Exception as e:
-            print(f'❌ 讀取試算表歷史紀錄失敗: {e}')
+            print(f'❌ 讀取試算表歷史紀錄失敗: {e} {GAS_WEB_URL}')
             if DISCORD_WEBHOOK_URL:
                 try:
                     errmsg = f'❌ 讀取試算表歷史紀錄失敗: {e}'
@@ -77,11 +77,17 @@ jobs:
 
         print('=== 步驟 2: 爬取星穹鐵道網頁最新序號 ===')
         # 💡 請將此處替換為您實際要抓取星穹鐵道兌換碼清單的目標網址
-        scrape_url = 'https://example.com' 
+        scrape_url = 'https://www.crimsonwitch.com/codes/Honkai_Star_Rail' 
         scrape_headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'accept-language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+            'cache-control': 'no-cache',
+            'pragma': 'no-cache',
+            'priority': 'u=0, i',
+            'upgrade-insecure-requests': '1'
         }
-
+        
         target_json_data = None
         try:
             res = requests.get(scrape_url, headers=scrape_headers, timeout=15)
