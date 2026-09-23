@@ -35,7 +35,12 @@ jobs:
         GAS_WEB_URL = os.getenv('GAS_WEB_URL')
         DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
 
+        # 🔍 自動修復網址：把前端可能誤帶的反斜線 \ 清除乾淨
+        if GAS_WEB_URL:
+            GAS_WEB_URL = GAS_WEB_URL.replace('\\', '').strip()
+
         print('=== 步驟 1: 開始讀取 Google 試算表 ===')
+        print(f'驗證網址格式: {GAS_WEB_URL[:30]}...') # 印出前段確認協定
         try:
             gas_res = requests.get(f'{GAS_WEB_URL}?action=getData')
             print(f'試算表回應狀態碼: {gas_res.status_code}')
