@@ -31,11 +31,25 @@ jobs:
         cat << 'EOF' > run.py
         import os, requests, json, time, sys
 
-        X_API_KEY = os.getenv('X_API_KEY')
-        GAS_WEB_URL = os.getenv('GAS_WEB_URL')
-        DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
+        # 🧼 終極字元清洗函式：徹底消滅所有被 GitHub 誤加的反斜線、引號與前後空格
+        def clean_secret(val):
+            if not val:
+                return ""
+            # 重複清洗，直到前後沒有任何反斜線、單雙引號和空格
+            cleaned = val.strip().strip('\\').strip("'").strip('"').strip()
+            # 針對網址內部的特殊防錯處理
+            if "http" in cleaned and cleaned.startswith("\\"):
+                cleaned = cleaned.lstrip("\\")
+            return cleaned
+
+        X_API_KEY = clean_secret(os.getenv('X_API_KEY', ''))
+        GAS_WEB_URL = clean_secret(os.getenv('GAS_WEB_URL', ''))
+        DISCORD_WEBHOOK_URL = clean_secret(os.getenv('DISCORD_WEBHOOK_URL', ''))
 
         print('=== 步驟 1: 開始讀取 Google 試算表 ===')
+        # 除錯列印：確認清洗後的網址開頭
+        print(f'⚙️ 清洗後的網址安全檢驗 (前20字): {GAS_WEB_URL[:20]}')
+        
         try:
             gas_res = requests.get(f'{GAS_WEB_URL}?action=getData')
             print(f'試算表回應狀態碼: {gas_res.status_code}')
@@ -54,7 +68,7 @@ jobs:
 
         if not user_ids:
             print('⚠️ 警告：試算表中的「帳號列表」是空的，請先確認工作表名稱是否叫「帳號列表」並填入 userId。')
-            sys.exit(0)
+            exit(0)
 
         print('\n=== 步驟 2: 開始呼叫 A-API 獲取序號 ===')
         headers_a = {
