@@ -29,16 +29,26 @@ jobs:
         DISCORD_WEBHOOK_URL: \${{ secrets.DISCORD_WEBHOOK_URL }}
       run: |
         cat << 'EOF' > run.py
-        import os, requests, json, time, sys
+        import os, requests, json, time, sys, re
 
-        # 清洗變數，確保沒有多餘字元
-        X_API_KEY = os.getenv('X_API_KEY', '').strip()
-        GAS_WEB_URL = os.getenv('GAS_WEB_URL', '').strip()
-        DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL', '').strip()
+        # 🧼 終極字元清洗函式：徹底消滅所有被 GitHub 環境誤加的反斜線、引號與前後空格
+        def clean_secret(val):
+            if not val: return ""
+            cleaned = val.strip().strip('\\').strip("'").strip('"').strip()
+            if "http" in cleaned and cleaned.startswith("\\"):
+                cleaned = cleaned.lstrip("\\")
+            return cleaned
+
+        X_API_KEY = clean_secret(os.getenv('X_API_KEY', ''))
+        GAS_WEB_URL = clean_secret(os.getenv('GAS_WEB_URL', ''))
+        DISCORD_WEBHOOK_URL = clean_secret(os.getenv('DISCORD_WEBHOOK_URL', ''))
 
         print('=== 步驟 1: 開始讀取 Google 試算表 ===')
         try:
             gas_res = requests.get(f'{GAS_WEB_URL}?action=getData')
+            if 'html' in gas_res.text.lower():
+                print('❌ 錯誤：Google 試算表回傳了 HTML 網頁！請確認 Apps Script 部署時存取權是否有設為「所有人 (Anyone)」。')
+                sys.exit(1)
             data = gas_res.json()
             sent_codes = data.get('sentCodes', [])
             user_ids = data.get('userIds', [])
@@ -51,7 +61,7 @@ jobs:
             print('⚠️ 警告：試算表中的「帳號列表」是空的，請先填入 userId。')
             sys.exit(0)
 
-        print('\n=== 步驟 2: 開始呼叫 A-API 獲取序號 JSON ===')
+        print('\n=== 步驟 2: 開始抓取網頁並解析序號 ===')
         headers_a = {
             'accept': '*/*',
             'accept-language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7,zh-CN;q=0.6',
@@ -65,32 +75,26 @@ jobs:
         }
 
         try:
-            res_a = requests.get('https://thebd2pulse.com', headers=headers_a)
-            print(f'A-API 回應狀態碼: {res_a.status_code}')
+            res_a = requests.get('https://api.thebd2pulse.com/redeem', headers=headers_a)
+            html_content = res_a.text
             
-            if res_a.status_code != 200:
-                print(f'❌ A-API 請求失敗: {res_a.text[:500]}')
-                sys.exit(1)
-            
-            # 直接進行 JSON 格式解析（若非 JSON 會直接報錯崩潰）
-            data_list = res_a.json()
-            print(f'成功獲取 API 陣列資料，共有 {len(data_list)} 筆序號明細。')
-            
+            # 🔍 使用正則表達式，精準抓取官方 HTML 網頁底層備用區塊中 <code> 標籤內的所有序號
+            raw_codes = re.findall(r'<code>([A-Z0-9_]+)</code>', html_content)
+            found_codes = list(set(raw_codes)) # 去除重複抓到的 code
+            print(f'成功從網頁中解析出 {len(found_codes)} 組潛在序號: {found_codes}')
         except Exception as e:
-            print(f'❌ A-API 格式錯誤或非預期 JSON 物件: {e}')
-            print(f'📄 伺服器回傳的原始文字片段為: {res_a.text[:200]}')
+            print(f'❌ 網頁抓取或正則解析異常: {e}')
             sys.exit(1)
 
         print('\n=== 步驟 3: 開始比對序號與發送 B-API ===')
         has_new = False
-        dc_msg = '🤖 **棕色塵埃2 序號兌換回報 (GitHub純API版)**\n'
+        dc_msg = '🤖 **棕色塵埃2 序號兌換回報 (GitHub爬蟲版)**\n'
 
-        for item in data_list:
-            code = item.get('code', '').strip()
-            status = item.get('status', '').strip()
+        for code in found_codes:
+            code = code.strip()
             
-            # 比對：狀態為 active，且之前沒發送過
-            if status == 'active' and code not in sent_codes:
+            # 比對歷史紀錄：如果是全新未發送過的 Code 才執行
+            if code not in sent_codes:
                 has_new = True
                 print(f'🎉 發現未發送過的新序號: {code}')
                 dc_msg += f'\n🎁 發現新序號: `{code}`\n'
@@ -99,7 +103,7 @@ jobs:
 
                 for idx, user_id in enumerate(user_ids):
                     if idx > 0:
-                        print('⏳ 安全機制：定時暫停 5 秒鐘...')
+                        print('⏳ 安全機制：暫停 5 秒鐘...')
                         time.sleep(5)
 
                     headers_b = {
@@ -128,7 +132,7 @@ jobs:
 
                 dc_msg += f'   ➔ 兌換結果：**{success}** 成功 / **{fail}** 失敗\n'
                 
-                print('💾 正在將紀錄寫回 Google 試算表...')
+                print('💾 正在將紀錄同步寫回 Google 試算表...')
                 requests.post(GAS_WEB_URL, json={'action': 'addCode', 'code': code})
                 requests.post(GAS_WEB_URL, json={'action': 'addLog', 'logs': log_payloads})
 
