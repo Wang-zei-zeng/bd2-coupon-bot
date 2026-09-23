@@ -98,7 +98,7 @@ jobs:
 
         print('\n=== 步驟 3: 開始比對序號與發送 B-API ===')
         has_new = False
-        dc_msg = '🤖 **棕色塵埃2 序號兌換回報 (GitHub純API版)**\n'
+        dc_msg = '🤖 **棕色塵埃2 序號兌換回報**\n'
 
         # 🛠️ 修正點：改回輪詢標準 API 的 data_list 陣列
         for item in data_list:
