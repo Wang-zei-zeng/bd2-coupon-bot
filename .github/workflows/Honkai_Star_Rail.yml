@@ -1,11 +1,6 @@
 name: Auto Run Web Scraper
 
 on:
-  push:
-    branches:
-      - main  # 當你 push 到 main 分支時會觸發一次
-  schedule:
-    - cron: '0 0 * * *'  # 每天台灣時間早上 08:00 自動執行一次
   workflow_dispatch:     # 允許你在 GitHub 網頁上手動點擊按鈕執行
 
 jobs:
