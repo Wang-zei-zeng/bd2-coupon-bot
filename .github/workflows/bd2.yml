@@ -136,7 +136,7 @@ jobs:
                             print(f'✅ 帳號 {user_id} 兌換成功')
                             try:
                                 datab_list = res_b.json()
-                                errorCodeStr = item.get('errorCode', '').strip()
+                                errorCodeStr = datab_list.get('errorCode', '').strip()
                                 print(f'✅ {errorCodeStr}')
                                 if errorCodeStr == 'AlreadyUsed':
                                     used += 1
