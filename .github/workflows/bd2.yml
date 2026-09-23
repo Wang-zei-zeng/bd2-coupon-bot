@@ -110,7 +110,7 @@ jobs:
                 has_new = True
                 print(f'🎉 發現未發送過的新序號: {code}')
                 dc_msg += f'\n🎁 發現新序號: `{code}`\n'
-                success, fail = 0, 0
+                success, fail, used = 0, 0, 0
                 log_payloads = []
 
                 for idx, user_id in enumerate(user_ids):
@@ -122,18 +122,23 @@ jobs:
                         'accept': '*/*',
                         'accept-language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7,zh-CN;q=0.6',
                         'cache-control': 'no-cache',
-                        'origin': 'https://redeem.bd2.pmang.cloud',
-                        'referer': 'https://redeem.bd2.pmang.cloud/',
-                        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36'
+                        'content-type': 'application/json',
+                        'pragma': 'no-cache',
+                        'priority': 'u=1, i',
+                        'Referer': 'https://redeem.bd2.pmang.cloud/'
                     }
                     payload_b = {'appId': 'bd2-live', 'userId': user_id, 'code': code}
 
                     try:
-                        res_b = requests.post('https://amazonaws.com', headers=headers_b, json=payload_b)
-                        log_payloads.append({'code': code, 'userId': user_id, 'resCode': res_b.status_code, 'resText': res_b.text[:200]})
+                        res_b = requests.post('https://loj2urwaua.execute-api.ap-northeast-1.amazonaws.com/prod/coupon', headers=headers_b, json=payload_b)
+                        log_payloads.append({'code': code, 'userId': user_id, 'resCode': res_b.status_code, 'resText': res_b.text})
                         if res_b.status_code == 200: 
                             success += 1
                             print(f'✅ 帳號 {user_id} 兌換成功')
+                            try:
+                                datab_list = res_b.json()
+                            except Exception as errr:
+                                print(f'❌ A-API 連線或解析 JSON 異常: {errr}')
                         else: 
                             fail += 1
                             print(f'❌ 帳號 {user_id} 失敗: {res_b.status_code} - {res_b.text}')
