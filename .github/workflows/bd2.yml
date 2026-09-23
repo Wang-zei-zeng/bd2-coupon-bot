@@ -3,7 +3,7 @@ name: BD2 Coupon Automation
 on:
   schedule:
     - cron: '0 1 * * *' # 每天台灣時間早上 09:00 自動執行
-  workflow_dispatch: # 允許您在 GitHub 網頁上手動點擊執行測試
+  workflow_dispatch: # 允許手動點擊執行測試
 
 jobs:
   run-automation:
@@ -30,20 +30,29 @@ jobs:
         GAS_WEB_URL = os.getenv('GAS_WEB_URL')
         DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
 
-        # 1. 向 Google 試算表拿取帳號與歷史紀錄
+        print('=== 步驟 1: 開始讀取 Google 試算表 ===')
         try:
-            gas_res = requests.get(f'{GAS_WEB_URL}?action=getData').json()
-            sent_codes = gas_res.get('sentCodes', [])
-            user_ids = gas_res.get('userIds', [])
+            gas_res = requests.get(f'{GAS_WEB_URL}?action=getData')
+            print(f'試算表回應狀態碼: {gas_res.status_code}')
+            
+            # 如果回傳的是網頁說明沒設為「所有人」
+            if 'html' in gas_res.text.lower():
+                print('❌ 錯誤：Google 試算表回傳了 HTML 網頁！請確認 Apps Script 部署時存取權是否有設為「所有人 (Anyone)」。')
+                exit(1)
+                
+            data = gas_res.json()
+            sent_codes = data.get('sentCodes', [])
+            user_ids = data.get('userIds', [])
+            print(f'成功讀取到 {len(user_ids)} 個遊戲帳號。')
         except Exception as e:
-            print(f'讀取試算表失敗: {e}')
+            print(f'❌ 讀取試算表發生異常崩潰: {e}')
             exit(1)
 
         if not user_ids:
-            print('試算表中沒有帳號列表')
+            print('⚠️ 警告：試算表中的「帳號列表」是空的，請先確認工作表名稱是否叫「帳號列表」並填入 userId。')
             exit(0)
 
-        # 2. 用您測試成功的完整 Header 呼叫 A-API
+        print('\n=== 步驟 2: 開始呼叫 A-API 獲取序號 ===')
         headers_a = {
             'accept': '*/*',
             'accept-language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7,zh-CN;q=0.6',
@@ -51,22 +60,23 @@ jobs:
             'content-type': 'application/json',
             'origin': 'https://thebd2pulse.com',
             'pragma': 'no-cache',
-            'referer': 'https://thebd2pulse.com/',
+            'referer': 'https://thebd2pulse.com',
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36',
             'x-api-key': X_API_KEY
         }
 
         try:
-            res_a = requests.get('https://api.thebd2pulse.com/redeem', headers=headers_a)
+            res_a = requests.get('https://thebd2pulse.com', headers=headers_a)
+            print(f'A-API 回應狀態碼: {res_a.status_code}')
             if res_a.status_code != 200:
-                print(f'A-API 錯誤: {res_a.status_code}')
+                print(f'❌ A-API 回傳錯誤內容: {res_a.text[:500]}')
                 exit(1)
             data_list = res_a.json()
         except Exception as e:
-            print(f'A-API 連線異常: {e}')
+            print(f'❌ A-API 連線或解析 JSON 異常: {e}')
             exit(1)
 
-        # 3. 比對並批量呼叫 B-API
+        print('\n=== 步驟 3: 開始比對序號與發送 B-API ===')
         has_new = False
         dc_msg = '🤖 **棕色塵埃2 序號兌換回報 (GitHub版)**\n'
 
@@ -74,6 +84,7 @@ jobs:
             code = item.get('code', '').strip()
             if item.get('status') == 'active' and code not in sent_codes:
                 has_new = True
+                print(f'🎉 發現未發送過的新序號: {code}')
                 dc_msg += f'\n🎁 發現新序號: `{code}`\n'
                 success, fail = 0, 0
                 log_payloads = []
@@ -96,21 +107,30 @@ jobs:
                     try:
                         res_b = requests.post('https://amazonaws.com', headers=headers_b, json=payload_b)
                         log_payloads.append({'code': code, 'userId': user_id, 'resCode': res_b.status_code, 'resText': res_b.text[:200]})
-                        if res_b.status_code == 200: success += 1
-                        else: fail += 1
+                        if res_b.status_code == 200: 
+                            success += 1
+                            print(f'✅ 帳號 {user_id} 兌換成功')
+                        else: 
+                            fail += 1
+                            print(f'❌ 帳號 {user_id} 失敗: {res_b.status_code} - {res_b.text}')
                     except Exception as err:
                         log_payloads.append({'code': code, 'userId': user_id, 'resCode': 'Exception', 'resText': str(err)})
                         fail += 1
+                        print(f'❌ 帳號 {user_id} 連線例外: {err}')
 
                 dc_msg += f'   ➔ 兌換結果：**{success}** 成功 / **{fail}** 失敗\n'
                 
-                # 寫回試算表
+                print('💾 正在將紀錄寫回 Google 試算表...')
                 requests.post(GAS_WEB_URL, json={'action': 'addCode', 'code': code})
                 requests.post(GAS_WEB_URL, json={'action': 'addLog', 'logs': log_payloads})
 
-        # 4. 發送 Discord 通知
+        print('\n=== 步驟 4: 發送 Discord 通知 ===')
         if has_new and DISCORD_WEBHOOK_URL:
             requests.post(DISCORD_WEBHOOK_URL, json={'content': dc_msg})
+            print('通知已發送至 Discord。')
         elif DISCORD_WEBHOOK_URL:
             requests.post(DISCORD_WEBHOOK_URL, json={'content': '👌 **每日排程檢查**：今天沒有新序號。'})
+            print('無新序號，已發送報平安通知。')
+        
+        print('🏁 全流程執行完畢！')
         "
