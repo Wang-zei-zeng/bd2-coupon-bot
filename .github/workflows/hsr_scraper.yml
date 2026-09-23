@@ -1,0 +1,237 @@
+name: HSR Auto Coupon Pipeline
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # 每天台灣時間早上 08:00 自動執行一次
+  workflow_dispatch:     # 允許手動點擊執行測試
+
+jobs:
+  hsr_pipeline:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests beautifulsoup4
+
+    - name: Scrape, Compare, Redeem and Log
+      env:
+        GAS_WEB_URL: ${{ secrets.HSR_GAS_WEB_URL }}
+        DISCORD_WEBHOOK_URL: ${{ secrets.HSR_DISCORD_WEBHOOK_URL }}
+        ACCOUNTS_JSON: ${{ secrets.HSR_ACCOUNTS_JSON }}
+      run: |
+        python << 'EOF'
+        import os, requests, json, re, time, sys
+        from bs4 import BeautifulSoup
+
+        GAS_WEB_URL = os.getenv('GAS_WEB_URL', '').strip()
+        DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL', '').strip()
+        ACCOUNTS_JSON = os.getenv('ACCOUNTS_JSON', '').strip()
+
+        if not GAS_WEB_URL or not ACCOUNTS_JSON:
+            print(f'❌ 錯誤：GitHub Secrets 未設定 HSR_GAS_WEB_URL 或 HSR_ACCOUNTS_JSON！')
+            if DISCORD_WEBHOOK_URL:
+                try:
+                    errmsg = f'❌ 錯誤：GitHub Secrets 未設定 HSR_GAS_WEB_URL 或 HSR_ACCOUNTS_JSON！'
+                    requests.post(DISCORD_WEBHOOK_URL, json={'content': errmsg}, timeout=10)
+                except Exception as e1:
+                    print(f'❌ Discord 通知發送失敗: {e1}')
+            sys.exit(1)
+
+        try:
+            user_accounts = json.loads(ACCOUNTS_JSON)
+            print(f'成功讀取到 {len(user_accounts)} 組獨立的鐵道米哈遊帳號憑證。')
+        except Exception as e:
+            print(f'❌ 解析 ACCOUNTS_JSON 發生錯誤: {e}')
+            if DISCORD_WEBHOOK_URL:
+                try:
+                    errmsg = f'❌ 解析 ACCOUNTS_JSON 發生錯誤: {e}'
+                    requests.post(DISCORD_WEBHOOK_URL, json={'content': errmsg}, timeout=10)
+                except Exception as e1:
+                    print(f'❌ Discord 通知發送失敗: {e1}')
+            sys.exit(1)
+
+        print('=== 步驟 1: 從 Google 試算表讀取歷史紀錄 ===')
+        try:
+            gas_res = requests.get(f'{GAS_WEB_URL}?action=getData', timeout=15)
+            data = gas_res.json()
+            sent_codes = data.get('sentCodes', [])
+            print(f'📊 試算表歷史已兌換序號共 {len(sent_codes)} 筆。')
+        except Exception as e:
+            print(f'❌ 讀取試算表歷史紀錄失敗: {e}')
+            if DISCORD_WEBHOOK_URL:
+                try:
+                    errmsg = f'❌ 讀取試算表歷史紀錄失敗: {e}'
+                    requests.post(DISCORD_WEBHOOK_URL, json={'content': errmsg}, timeout=10)
+                except Exception as e1:
+                    print(f'❌ Discord 通知發送失敗: {e1}')
+            sys.exit(1)
+
+        print('=== 步驟 2: 爬取星穹鐵道網頁最新序號 ===')
+        # 💡 請將此處替換為您實際要抓取星穹鐵道兌換碼清單的目標網址
+        scrape_url = 'https://example.com' 
+        scrape_headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+
+        target_json_data = None
+        try:
+            res = requests.get(scrape_url, headers=scrape_headers, timeout=15)
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.text, 'html.parser')
+                for script in soup.find_all('script'):
+                    if script.string and 'initialCodes' in script.string:
+                        match = re.search(r'self\.__next_f\.push\(\[\d+,\s*"(.*)"\s*\]\)', script.string)
+                        if match:
+                            raw_str = match.group(1).replace('\n', '')
+                            clean_str = raw_str.replace('\"', '"').replace('"$undefined"', 'null')
+                            inner_match = re.search(r'\{"initialCodes".*?\]\}', clean_str)
+                            if inner_match:
+                                target_json_data = json.loads(inner_match.group(0))['initialCodes']
+                                break
+        except Exception as e:
+            print(f'❌ 爬取網頁發生異常: {e}')
+            if DISCORD_WEBHOOK_URL:
+                try:
+                    errmsg = f'❌ 爬取網頁發生異常: {e}'
+                    requests.post(DISCORD_WEBHOOK_URL, json={'content': errmsg}, timeout=10)
+                except Exception as e1:
+                    print(f'❌ Discord 通知發送失敗: {e1}')
+            sys.exit(1)
+
+        if not target_json_data:
+            print(f'❌ 錯誤：無法從網頁中提取 `initialCodes` 資料。')
+            if DISCORD_WEBHOOK_URL:
+                try:
+                    errmsg = f'❌ 錯誤：無法從網頁中提取 `initialCodes` 資料。'
+                    requests.post(DISCORD_WEBHOOK_URL, json={'content': errmsg}, timeout=10)
+                except Exception as e1:
+                    print(f'❌ Discord 通知發送失敗: {e1}')
+            sys.exit(1)
+
+        code_list = [item['code'].strip() for item in target_json_data if 'code' in item]
+        print(f"🎉 網頁目前最新的序號清單: {code_list}")
+
+        print('=== 步驟 3: 比對新序號並批量執行兌換 ===')
+        new_codes = [code for code in code_list if code not in sent_codes]
+
+        if not new_codes:
+            print('👌 檢查完畢：所有序號在歷史紀錄中皆已兌換過，今天沒有新序號。')
+            if DISCORD_WEBHOOK_URL:
+                try:
+                    requests.post(DISCORD_WEBHOOK_URL, json={'content': '👌 **崩壞：星穹鐵道 每日排程檢查**：今天沒有新序號。'}, timeout=10)
+                except:
+                    pass
+            sys.exit(0)
+
+        print(f'🔥 發現全新未兌換的新序號: {new_codes}')
+        api_url = "https://public-operation-hkrpg.hoyoverse.com/common/apicdkey/api/webExchangeCdkeyRisk"
+        dc_msg = '🤖 **崩壞：星穹鐵道 自動序號兌換回報**'
+        
+        for code in new_codes:
+            code = code.strip()
+            print(f'🎁 開始處理序號: {code}')
+            dc_msg += f'🎁 發現新序號: `{code}`'
+            
+            success_cnt = 0
+            already_cnt = 0
+            fail_cnt = 0
+            log_payloads = []
+
+            for idx, acc in enumerate(user_accounts):
+                uid = str(acc.get('uid', '')).strip()
+                user_cookie = str(acc.get('cookie', '')).strip()
+                device_uuid = str(acc.get('device_uuid', '')).strip()
+
+                if not uid or not user_cookie:
+                    print(f'⚠️ 欄位缺失：第 {idx+1} 筆資料缺少 UID 或 Cookie，自動跳過。')
+                    fail_cnt += 1
+                    continue
+
+                if idx > 0:
+                    print('⏳ 安全冷卻機制：切換帳號兌換間隔，暫停 6 秒鐘...')
+                    time.sleep(6)
+
+                api_headers = {
+                    "accept": "*/*",
+                    "accept-language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+                    "cache-control": "no-cache",
+                    "content-type": "application/json;",
+                    "pragma": "no-cache",
+                    "priority": "u=1, i",
+                    "cookie": user_cookie,
+                    "Referer": "https://hsr.hoyoverse.com/"
+                }
+
+                current_timestamp = int(time.time() * 1000)
+                payload_b = {
+                    "t": current_timestamp,
+                    "lang": "zh-tw",
+                    "game_biz": "hkrpg_global",
+                    "uid": uid,
+                    "region": "prod_official_asia",
+                    "cdkey": str(code),
+                    "platform": "4",
+                    "device_uuid": device_uuid
+                }
+
+                try:
+                    res = requests.post(api_url, headers=api_headers, json=payload_b, timeout=10)
+                    res_text = res.text
+                    
+                    if res.status_code == 200:
+                        res_json = res.json()
+                        retcode = res_json.get('retcode', -1)
+                        msg = res_json.get('message', '')
+                        
+                        if retcode == 0:
+                            success_cnt += 1
+                            print(f'✅ 帳號 {uid}: 兌換成功！')
+                        elif retcode == -2017 or "already" in msg.lower():
+                            already_cnt += 1
+                            print(f'ℹ️ 帳號 {uid}: 以前就已經領取過了')
+                        else:
+                            fail_cnt += 1
+                            print(f'❌ 帳號 {uid} 失敗 (retcode: {retcode}, msg: {msg})')
+                    else:
+                        fail_cnt += 1
+                        print(f'❌ 帳號 {uid} 請求失敗 (HTTP {res.status_code})')
+                    
+                    log_payloads.append({
+                        'code': code, 'userId': uid, 'resCode': res.status_code, 'resText': res_text
+                    })
+                except Exception as err:
+                    fail_cnt += 1
+                    print(f'❌ 帳號 {uid} 連線異常: {err}')
+                    log_payloads.append({
+                        'code': code, 'userId': uid, 'resCode': 'Exception', 'resText': str(err)
+                    })
+
+            dc_msg += f'   ➔ 👥 帳號憑證總數: **{len(user_accounts)}** 組'
+            dc_msg += f'   ➔ 🎉 新成功: **{success_cnt}** / 📝 以前已領過: **{already_cnt}** / ❌ 失敗: **{fail_cnt}**'
+
+            print(f'💾 正在將紀錄同步寫回 Google 試算表 ({code})...')
+            try:
+                requests.post(GAS_WEB_URL, json={'action': 'addCode', 'code': code}, timeout=10)
+                requests.post(GAS_WEB_URL, json={'action': 'addLog', 'logs': log_payloads}, timeout=10)
+            except Exception as sheet_err:
+                print(f'⚠️ 警告：寫回 Google 試算表失敗: {sheet_err}')
+
+        print('=== 步驟 4: 發送 Discord 通知 ===')
+        if DISCORD_WEBHOOK_URL:
+            try:
+                requests.post(DISCORD_WEBHOOK_URL, json={'content': dc_msg}, timeout=10)
+                print('✅ 兌換通知已成功送至 Discord。')
+            except Exception as e:
+                print(f'❌ Discord 通知發送失敗: {e}')
+        
+        print('🏁 全流程自動化整合執行完畢！')
+        EOF
