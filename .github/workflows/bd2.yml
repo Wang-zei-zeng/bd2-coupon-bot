@@ -103,10 +103,8 @@ jobs:
         # 🛠️ 修正點：改回輪詢標準 API 的 data_list 陣列
         for item in data_list:
             code = item.get('code', '').strip()
-            status = item.get('status', '').strip()
-            
             # 比對：如果狀態是 active 且沒發送過
-            if status == 'active' and code not in sent_codes:
+            if code not in sent_codes:
                 has_new = True
                 print(f'🎉 發現未發送過的新序號: {code}')
                 dc_msg += f'\n🎁 發現新序號: `{code}`\n'
