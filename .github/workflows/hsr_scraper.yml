@@ -895,272 +895,136 @@ jobs:
         )
 
 
+        # 先在迴圈外宣告動態簽名簽到工具，確保安全防護
+        def _generate_hsr_ds():
+            import hashlib
+            import random
+            salt = "6cqshv2g4g96669snclb6g706f966a2m" # 網頁端專用公共密鑰
+            t = int(time.time())
+            r = ''.join(random.sample('abcdefghijklmnopqrstuvwxyz0123456789', 6))
+            main_str = f"salt={salt}&t={t}&r={r}"
+            ds = hashlib.md5(main_str.encode(encoding='utf-8')).hexdigest()
+            return f"{t},{r},{ds}"
+
+        # ============================================================
+        # 核心兌換與 Cookie 防脫退處理迴圈
+        # ============================================================
         for code in new_codes:
-
             print()
-            print(
-                '=' * 60
-            )
-
-            print(
-                f'🎁 開始處理: {code}'
-            )
-
-            print(
-                '=' * 60
-            )
-
+            print('=' * 60)
+            print(f'🎁 開始處理: {code}')
+            print('=' * 60)
 
             success_cnt = 0
             already_cnt = 0
             fail_cnt = 0
-
             log_payloads = []
 
-
-            for idx, acc in enumerate(
-                user_accounts
-            ):
-
-
-                uid = str(
-                    acc.get(
-                        'uid',
-                        ''
-                    )
-                ).strip()
-
-
-                user_cookie = str(
-                    acc.get(
-                        'cookie',
-                        ''
-                    )
-                ).strip()
-
-
-                device_uuid = str(
-                    acc.get(
-                        'device_uuid',
-                        ''
-                    )
-                ).strip()
-
+            for idx, acc in enumerate(user_accounts):
+                uid = str(acc.get('uid', '')).strip()
+                user_cookie = str(acc.get('cookie', '')).strip()
+                device_uuid = str(acc.get('device_uuid', '')).strip()
 
                 if not uid or not user_cookie:
-
-                    print(
-                        f'⚠️ 第 {idx + 1} 筆帳號缺少 '
-                        'UID 或 Cookie，跳過。'
-                    )
-
+                    print(f'⚠️ 第 {idx + 1} 筆帳號缺少 UID 或 Cookie，跳過。')
                     fail_cnt += 1
-
                     continue
 
-
                 if idx > 0:
-
-                    print(
-                        '⏳ 等待 6 秒...'
-                    )
-
+                    print('⏳ 等待 6 秒...')
                     time.sleep(6)
 
+                # ----------------------------------------------------
+                # 1. 建立 Session 連線池，完美偽裝 Cookie 儲存交互
+                # ----------------------------------------------------
+                session = requests.Session()
+                
+                # 將原先的大字串 Cookie 解析成字典寫入 Session 容器，大幅延長生命週期
+                cookie_dict = {}
+                for item in user_cookie.split(';'):
+                    if '=' in item:
+                        k, v = item.strip().split('=', 1)
+                        cookie_dict[k] = v
+                session.cookies.update(cookie_dict)
 
+                # ----------------------------------------------------
+                # 2. 注入高度偽裝防護 Headers（包含 DS 加密簽名與客戶端識別碼）
+                # ----------------------------------------------------
                 headers = {
-
-                    'accept': '*/*',
-
-                    'accept-language': (
-                        'zh-TW,zh;q=0.9,'
-                        'en-US;q=0.8,en;q=0.7'
-                    ),
-
+                    'accept': 'application/json, text/plain, */*',
+                    'accept-language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
                     'cache-control': 'no-cache',
-
-                    'content-type':
-                        'application/json',
-
                     'pragma': 'no-cache',
-
-                    'cookie': user_cookie,
-
-                    'Referer':
-                        'https://hsr.hoyoverse.com/',
-
-                    'User-Agent':
-                        'Mozilla/5.0 '
-                        '(Windows NT 10.0; Win64; x64) '
-                        'AppleWebKit/537.36 '
-                        '(KHTML, like Gecko) '
-                        'Chrome/120.0 Safari/537.36'
+                    'Referer': 'https://hsr.hoyoverse.com/',
+                    'Origin': 'https://hsr.hoyoverse.com',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                    'X-Rpc-App_version': '1.5.0',
+                    'X-Rpc-Client_type': '4',         # 強制指定客戶端為 Web 網頁端
+                    'DS': _generate_hsr_ds()          # 帶上動態安全指紋，防止 Cookie 被踢登出
                 }
-
 
                 payload = {
-
-                    't':
-                        int(
-                            time.time() * 1000
-                        ),
-
-                    'lang':
-                        'zh-tw',
-
-                    'game_biz':
-                        'hkrpg_global',
-
-                    'uid':
-                        uid,
-
-                    'region':
-                        'prod_official_asia',
-
-                    'cdkey':
-                        code,
-
-                    'platform':
-                        '4',
-
-                    'device_uuid':
-                        device_uuid
+                    't': int(time.time() * 1000),
+                    'lang': 'zh-tw',
+                    'game_biz': 'hkrpg_global',
+                    'uid': uid,
+                    'region': 'prod_official_asia',  # 如果您是亞服保持原樣，台港澳服需手動改為 prod_official_cht
+                    'cdkey': code.strip(),
+                    'platform': '4',
+                    'device_uuid': device_uuid
                 }
 
-
                 try:
-
-                    res = requests.post(
-
+                    # 使用更新後的 session 連線池進行網路傳輸
+                    res = session.post(
                         EXCHANGE_API_URL,
-
                         headers=headers,
-
                         json=payload,
-
                         timeout=15
-
                     )
-
-
                     res_text = res.text
 
-
                     if res.status_code == 200:
-
                         try:
-
                             res_json = res.json()
-
                         except Exception:
-
                             res_json = {}
 
-
-                        retcode = res_json.get(
-                            'retcode',
-                            -1
-                        )
-
-
-                        msg = str(
-                            res_json.get(
-                                'message',
-                                ''
-                            )
-                        )
-
+                        retcode = res_json.get('retcode', -1)
+                        msg = str(res_json.get('message', ''))
 
                         if retcode == 0:
-
                             success_cnt += 1
-
-                            print(
-                                f'✅ 帳號 {uid}: '
-                                '兌換成功'
-                            )
-
-
-                        elif (
-
-                            retcode == -2017
-
-                            or 'already'
-                            in msg.lower()
-
-                        ):
-
+                            print(f'✅ 帳號 {uid}: 兌換成功')
+                        elif retcode == -2017 or 'already' in msg.lower():
                             already_cnt += 1
-
-                            print(
-                                f'ℹ️ 帳號 {uid}: '
-                                '以前已領取'
-                            )
-
-
-                        else:
-
+                            print(f'ℹ️ 帳號 {uid}: 以前已領取')
+                        elif retcode == -100:
                             fail_cnt += 1
-
-                            print(
-                                f'❌ 帳號 {uid}: '
-                                f'{retcode} / {msg}'
-                            )
-
-
+                            print(f'❌ 帳號 {uid}: 認證過期或已被風控登出 (retcode: -100)')
+                        else:
+                            fail_cnt += 1
+                            print(f'❌ 帳號 {uid}: {retcode} / {msg}')
                     else:
-
                         fail_cnt += 1
-
-                        print(
-                            f'❌ 帳號 {uid}: '
-                            f'HTTP {res.status_code}'
-                        )
-
+                        print(f'❌ 帳號 {uid}: HTTP {res.status_code}')
 
                     log_payloads.append({
-
-                        'code':
-                            code,
-
-                        'userId':
-                            uid,
-
-                        'resCode':
-                            res.status_code,
-
-                        'resText':
-                            res_text
-
+                        'code': code,
+                        'userId': uid,
+                        'resCode': res.status_code,
+                        'resText': res_text
                     })
-
 
                 except Exception as err:
-
                     fail_cnt += 1
-
-                    print(
-                        f'❌ 帳號 {uid}: '
-                        f'{err}'
-                    )
-
-
+                    print(f'❌ 帳號 {uid}: {err}')
                     log_payloads.append({
-
-                        'code':
-                            code,
-
-                        'userId':
-                            uid,
-
-                        'resCode':
-                            'Exception',
-
-                        'resText':
-                            str(err)
-
+                        'code': code,
+                        'userId': uid,
+                        'resCode': 'Exception',
+                        'resText': str(err)
                     })
-
 
             # ========================================================
             # Discord summary
